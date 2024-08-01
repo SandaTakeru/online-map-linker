@@ -9,9 +9,9 @@ Launch OML from the Processing Tools panel.<br>
 Set parameters.<br>
 You can link to these online maps. If you need other maps, please contact me.<br>
 ## Generated links
-![002](./002.png)<br>
-HTML format<br>
+### New field in layer
 ![003](./003.png)<br>
-New field in layer<br>
+### HTML format
+![002](./002.png)<br>
+### CSV format
 ![004](./004.png)<br>
-CSV format
