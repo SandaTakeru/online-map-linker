@@ -1,2 +1,2 @@
 # Online Map Linker
-This plugin outputs a links to an online map from a point layer.
+This QGIS plugin outputs a links to an online map from a point layer.
