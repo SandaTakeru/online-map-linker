@@ -6,7 +6,7 @@
 name=Online Map Linker
 qgisMinimumVersion=3.0
 description=This plugin makes links from points to online map.
-version=0.20240801
+version=0.20240805
 author=Sanda Takeru
 email=takeru_sanda999@maff.go.jp
 
