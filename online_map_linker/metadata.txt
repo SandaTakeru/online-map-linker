@@ -6,11 +6,11 @@
 name=Online Map Linker
 qgisMinimumVersion=3.0
 description=This plugin makes links from points to online map.
-version=0.20240805
+version=0.20240814
 author=Sanda Takeru
 email=takeru_sanda999@maff.go.jp
 
-about=This plugin outputs a links to an online map from a point layer.
+about=This plugin makes links from point layer to online map. in ; Google Maps, Apple Maps, Open Street Map, Google Earth, Yahoo! MAP, Bing Maps and so on. You can link to these online maps. If you need other maps, please contact me.
 
 tracker=https://github.com/SandaTakeru/online-map-linker/issues
 repository=https://github.com/SandaTakeru/online-map-linker
@@ -27,7 +27,7 @@ tags=web, online, map, link, open, google, HTML, CSV
 
 homepage=https://github.com/SandaTakeru/online-map-linker
 category=Analysis
-icon=icon.svg
+icon=icon.png
 # experimental flag
 experimental=False
 
