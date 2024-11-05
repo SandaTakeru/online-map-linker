@@ -11,7 +11,7 @@ __revision__ = '$Format:%H$'
 from pathlib import Path
 from PyQt5.QtGui import QIcon
 from qgis.core import QgsProcessingProvider
-from .online_map_linker_algorithm import OnlineMapLinkerHTML,OnlineMapLinkerCSV,OnlineMapLinkerLayer
+from .online_map_linker_algorithm import OnlineMapLinkerHTML,OnlineMapLinkerCSV,OnlineMapLinkerLayer, OnlineMapLinkerMulti
 
 
 class OnlineMapLinkerProvider(QgsProcessingProvider):
@@ -26,6 +26,7 @@ class OnlineMapLinkerProvider(QgsProcessingProvider):
         self.addAlgorithm(OnlineMapLinkerHTML())
         self.addAlgorithm(OnlineMapLinkerCSV())
         self.addAlgorithm(OnlineMapLinkerLayer())
+        self.addAlgorithm(OnlineMapLinkerMulti())
         # add additional algorithms here
 
     def id(self):

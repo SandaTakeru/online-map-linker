@@ -9,6 +9,11 @@ description=This plugin makes links from points to online map.
 version=0.20240814
 author=Sanda Takeru
 email=takeru_sanda999@maff.go.jp
+changelog = 
+    2024 Aug.
+        *First release.
+    2024 Nov.
+        *New feature: Multi-destination routing for GoogleMaps.
 
 about=This plugin makes links from point layer to online map. in ; Google Maps, Apple Maps, Open Street Map, Google Earth, Yahoo! MAP, Bing Maps and so on. You can link to these online maps. If you need other maps, please contact me.
 
@@ -20,7 +25,7 @@ repository=https://github.com/SandaTakeru/online-map-linker
 
 hasProcessingProvider=yes
 # Uncomment the following line and add your changelog:
-# changelog=first release
+
 
 # Tags are comma separated with spaces allowed
 tags=web, online, map, link, open, google, HTML, CSV
