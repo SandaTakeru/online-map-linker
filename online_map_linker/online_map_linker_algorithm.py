@@ -50,7 +50,7 @@ class OnlineMapLinkerHTML(QgsProcessingAlgorithm):
         # Check if the layer has features
         feature_count = point_layer.featureCount()     
         if feature_count == 0:
-            error_msg = 'The layer "{}" has no features. Exiting process.'.format(point_layer.name())
+            error_msg = 'The layer has no features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
 
@@ -177,7 +177,7 @@ class OnlineMapLinkerCSV(QgsProcessingAlgorithm):
         # Check if the layer has features
         feature_count = point_layer.featureCount()     
         if feature_count == 0:
-            error_msg = 'The layer "{}" has no features. Exiting process.'.format(point_layer.name())
+            error_msg = 'The layer has no features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
             
@@ -304,7 +304,7 @@ class OnlineMapLinkerLayer(QgsProcessingAlgorithm):
         # Check if the layer has features
         feature_count = point_layer.featureCount()     
         if feature_count == 0:
-            error_msg = 'The layer "{}" has no features. Exiting process.'.format(point_layer.name())
+            error_msg = 'The layer has no features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
             
@@ -415,7 +415,7 @@ class OnlineMapLinkerMulti(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config):
         
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features.)', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
         #self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
         #self.addParameter(QgsProcessingParameterField(self.NAME_FIELD, 'Name Field - If blank, the coordinates will be used.', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
@@ -436,10 +436,14 @@ class OnlineMapLinkerMulti(QgsProcessingAlgorithm):
         html_path = self.parameterAsString(parameters, self.HTML_PATH, context)
         url_title = self.parameterAsString(parameters, self.URL_TITLE, context)
         
-        # Check if the layer has features
+        # Check if the layer features count
         feature_count = point_layer.featureCount()     
         if feature_count == 0:
-            error_msg = 'The layer "{}" has no features. Exiting process.'.format(point_layer.name())
+            error_msg = 'The layer has no features. Exiting process.'
+            feedback.reportError(error_msg)
+            raise Exception(error_msg)
+        elif feature_count > 10:
+            error_msg = 'The layer has over 10 features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
 
