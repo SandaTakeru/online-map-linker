@@ -7,10 +7,10 @@ __revision__ = '$Format:%H$'
 
 import tempfile, datetime
 
-from qgis.PyQt.QtCore import QCoreApplication, QVariant
+from qgis.PyQt.QtCore import QCoreApplication, QMetaType
 from qgis.core import (QgsProcessing, QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterField, QgsProcessingParameterEnum, QgsCoordinateReferenceSystem, QgsProcessingParameterFileDestination,
-                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsProcessingParameterString, QgsFeatureRequest)
+                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProcessingParameterString, QgsProcessingParameterCrs, QgsFeatureRequest)
 
 class OnlineMapLinkerBase(QgsProcessingAlgorithm):
     MAP_LIST = ['Google Maps', 'Apple Maps', 'Open Street Map', 'GSI Maps Japan', 'GSI Maps Vector Japan', 'Google Earth', 'Yahoo! MAP', 'Bing Maps', 'Mapion', 'MapFan']
@@ -61,7 +61,7 @@ class OnlineMapLinkerHTML(OnlineMapLinkerBase):
     HTML_PATH = 'html_path'
 
     def initAlgorithm(self, config):
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
         self.addParameter(QgsProcessingParameterField(self.NAME_FIELD, 'Name Field - If blank, the coordinates will be used.', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
@@ -85,7 +85,7 @@ class OnlineMapLinkerHTML(OnlineMapLinkerBase):
 
         link_function = self.generateLinkFunction(self.MAP_LIST[online_map])
 
-        html_output = "<html><body><h1>Online Map Linker</h1><ul>\n"
+        html_output = "<html><head><meta charset=\"utf-8\"></head><body><h1>Online Map Linker</h1><ul>\n"
         for feature in features:
             geometry = feature.geometry()
             geometry.transform(transform)
@@ -127,7 +127,7 @@ class OnlineMapLinkerCSV(OnlineMapLinkerBase):
     CSV_PATH = 'csv_path'
 
     def initAlgorithm(self, config):
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
         self.addParameter(QgsProcessingParameterFileDestination(self.CSV_PATH, 'CSV Output', fileFilter='CSV files (*.csv)', defaultValue=None))
         self.addOutput(QgsProcessingOutputHtml(self.OUTPUT, 'Online Map Linker (CSV) output'))
@@ -148,27 +148,33 @@ class OnlineMapLinkerCSV(OnlineMapLinkerBase):
 
         link_function = self.generateLinkFunction(self.MAP_LIST[online_map])
 
-        output_layer = QgsVectorLayer("Point?crs=epsg:4326", "online map linked", "memory")
+        source_crs = point_layer.sourceCrs()
+        output_layer = QgsVectorLayer(f"Point?crs={source_crs.authid()}", "online map linked", "memory")
         output_layer_data = output_layer.dataProvider()
         output_layer_data.addAttributes(point_layer.fields().toList())
         output_layer.updateFields()
 
         oml_field = "OML_" + self.MAP_LIST[online_map]
-        output_layer.dataProvider().addAttributes([QgsField(oml_field, QVariant.String)])
+        output_layer.dataProvider().addAttributes([QgsField(oml_field, QMetaType.Type.QString)])
         output_layer.updateFields()
 
         for feature in features:
-            geometry = feature.geometry()
-            geometry.transform(transform)
-            x, y = geometry.asPoint().x(), geometry.asPoint().y()
+            wgs84_point = transform.transform(feature.geometry().asPoint())
+            x, y = wgs84_point.x(), wgs84_point.y()
             link = link_function(x, y, "Pin")
-            output_layer_data.addFeatures([feature])
-            attributes = {output_layer.fields().indexFromName(oml_field): link}
-            output_layer_data.changeAttributeValues({feature.id(): attributes})
+            new_feature = QgsFeature(output_layer.fields())
+            new_feature.setGeometry(feature.geometry())
+            for field in point_layer.fields():
+                new_feature[field.name()] = feature[field.name()]
+            new_feature[oml_field] = link
+            output_layer_data.addFeatures([new_feature])
 
         output_filepath = tempfile.gettempdir() + '/OML('+self.MAP_LIST[online_map]+')_'+datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime('%Y%m%d-%H%M%S')+'.csv' if 'csv_path.csv' in csv_path else csv_path
         output_layer.updateFields()
-        QgsVectorFileWriter.writeAsVectorFormat(output_layer, output_filepath, "Shift_JIS", driverName="CSV")
+        csv_options = QgsVectorFileWriter.SaveVectorOptions()
+        csv_options.driverName = 'CSV'
+        csv_options.fileEncoding = 'Shift_JIS'
+        QgsVectorFileWriter.writeAsVectorFormatV3(output_layer, output_filepath, QgsProject.instance().transformContext(), csv_options)
         return {self.OUTPUT: output_filepath}
 
     def name(self):
@@ -196,10 +202,12 @@ class OnlineMapLinkerLayer(OnlineMapLinkerBase):
     POINT_LAYER = 'point_layer'
     ONLINE_MAP = 'online_map'
     LAYER_PATH = 'layer_path'
+    OUTPUT_CRS = 'output_crs'
 
     def initAlgorithm(self, config):
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
+        self.addParameter(QgsProcessingParameterCrs(self.OUTPUT_CRS, 'Output CRS', defaultValue='ProjectCrs'))
         self.addParameter(QgsProcessingParameterFileDestination(self.LAYER_PATH, 'Layer Output', fileFilter='GeoPackage file (*.gpkg)', defaultValue=None))
 
     def processAlgorithm(self, parameters, context, feedback):
@@ -207,6 +215,7 @@ class OnlineMapLinkerLayer(OnlineMapLinkerBase):
         online_map = self.parameterAsEnum(parameters, self.ONLINE_MAP, context)
         sort_field = self.parameterAsString(parameters, self.SORT_FIELD, context)
         layer_path = self.parameterAsString(parameters, self.LAYER_PATH, context)
+        output_crs = self.parameterAsCrs(parameters, self.OUTPUT_CRS, context)
 
         if point_layer.featureCount() == 0:
             error_msg = 'The layer has no features. Exiting process.'
@@ -214,34 +223,42 @@ class OnlineMapLinkerLayer(OnlineMapLinkerBase):
             raise Exception(error_msg)
 
         transform = self.createCoordinateTransform(point_layer.sourceCrs())
+        geom_transform = QgsCoordinateTransform(point_layer.sourceCrs(), output_crs, QgsProject.instance())
         features = self.getSortedFeatures(point_layer, sort_field)
 
         link_function = self.generateLinkFunction(self.MAP_LIST[online_map])
 
-        output_layer = QgsVectorLayer("Point?crs=epsg:4326", "online map linked", "memory")
+        output_layer = QgsVectorLayer(f"Point?crs={output_crs.authid()}", "online map linked", "memory")
         output_layer_data = output_layer.dataProvider()
         output_layer_data.addAttributes(point_layer.fields().toList())
         output_layer.updateFields()
 
         oml_field = "OML_" + self.MAP_LIST[online_map]
-        output_layer.dataProvider().addAttributes([QgsField(oml_field, QVariant.String)])
+        output_layer.dataProvider().addAttributes([QgsField(oml_field, QMetaType.Type.QString)])
         output_layer.updateFields()
 
         for feature in features:
-            geometry = feature.geometry()
-            geometry.transform(transform)
-            x, y = geometry.asPoint().x(), geometry.asPoint().y()
+            source_pt = feature.geometry().asPoint()
+            wgs84_point = transform.transform(source_pt)
+            x, y = wgs84_point.x(), wgs84_point.y()
             link = link_function(x, y, "Pin")
-            
-            output_layer_data.addFeatures([feature])
-            attributes = {output_layer.fields().indexFromName(oml_field): link}
-            output_layer_data.changeAttributeValues({feature.id(): attributes})
+            out_pt = geom_transform.transform(source_pt)
+            new_feature = QgsFeature(output_layer.fields())
+            new_feature.setGeometry(QgsGeometry.fromPointXY(out_pt))
+            for field in point_layer.fields():
+                new_feature[field.name()] = feature[field.name()]
+            new_feature[oml_field] = link
+            output_layer_data.addFeatures([new_feature])
 
-        if 'layer_path' in layer_path:
+        if layer_path == QgsProcessing.TEMPORARY_OUTPUT or 'layer_path' in layer_path:
+            output_layer.setName('online_map_linked')
             QgsProject.instance().addMapLayer(output_layer)
         else:
-            QgsVectorFileWriter.writeAsVectorFormat(output_layer, layer_path, "UTF-8")
-            QgsProject.instance().addMapLayer(QgsVectorLayer(layer_path, "online_map_linked", "ogr"))
+            layer_options = QgsVectorFileWriter.SaveVectorOptions()
+            layer_options.driverName = 'GPKG'
+            layer_options.fileEncoding = 'UTF-8'
+            QgsVectorFileWriter.writeAsVectorFormatV3(output_layer, layer_path, QgsProject.instance().transformContext(), layer_options)
+            QgsProject.instance().addMapLayer(QgsVectorLayer(layer_path, 'online_map_linked', 'ogr'))
         return {self.OUTPUT: layer_path}
 
     def name(self):
@@ -271,7 +288,7 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
     URL_TITLE = 'url_title'
 
     def initAlgorithm(self, config):
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features.)', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features.)', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterString(self.URL_TITLE, 'URL Title', defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterFileDestination(self.HTML_PATH, 'HTML Output', fileFilter='HTML files (*.html)', defaultValue=None))
@@ -304,7 +321,7 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
             URL += f"/{y},{x}"
 
         link_text = f'<p><a href="{URL}" target="_blank">{url_title}</a></p>' if url_title else f'<p><a href="{URL}" target="_blank">{URL}</a></p>'
-        html_output = f"<html><body><h1>Online Map Linker</h1>{link_text}<p>Generated by the QGIS plugin \"<a href=\"https://plugins.qgis.org/plugins/online_map_linker/\" target=\"_blank\">Online Map Linker</a>\".</p></body></html>"
+        html_output = f"<html><head><meta charset=\"utf-8\"></head><body><h1>Online Map Linker</h1>{link_text}<p>Generated by the QGIS plugin \"<a href=\"https://plugins.qgis.org/plugins/online_map_linker/\" target=\"_blank\">Online Map Linker</a>\".</p></body></html>"
 
         output_filepath = tempfile.gettempdir() + '/OML(Google Maps)_'+datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime('%Y%m%d-%H%M%S')+'.html' if 'html_path.html' in html_path else html_path
         with open(output_filepath, 'w', encoding='utf-8') as f:
