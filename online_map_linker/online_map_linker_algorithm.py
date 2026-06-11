@@ -10,7 +10,7 @@ import tempfile, datetime
 from qgis.PyQt.QtCore import QCoreApplication, QMetaType
 from qgis.core import (QgsProcessing, QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterField, QgsProcessingParameterEnum, QgsCoordinateReferenceSystem, QgsProcessingParameterFileDestination,
-                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProcessingParameterString, QgsProcessingParameterCrs, QgsFeatureRequest)
+                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsProcessingOutputFile, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProcessingParameterString, QgsProcessingParameterCrs, QgsFeatureRequest)
 
 class OnlineMapLinkerBase(QgsProcessingAlgorithm):
     MAP_LIST = ['Google Maps', 'Apple Maps', 'Open Street Map', 'GSI Maps Japan', 'GSI Maps Vector Japan', 'Google Earth', 'Yahoo! MAP', 'Bing Maps', 'Mapion', 'MapFan']
@@ -129,8 +129,9 @@ class OnlineMapLinkerCSV(OnlineMapLinkerBase):
     def initAlgorithm(self, config):
         self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
+        self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterFileDestination(self.CSV_PATH, 'CSV Output', fileFilter='CSV files (*.csv)', defaultValue=None))
-        self.addOutput(QgsProcessingOutputHtml(self.OUTPUT, 'Online Map Linker (CSV) output'))
+        self.addOutput(QgsProcessingOutputFile(self.OUTPUT, 'Online Map Linker (CSV) output'))
 
     def processAlgorithm(self, parameters, context, feedback):
         point_layer = self.parameterAsSource(parameters, self.POINT_LAYER, context)
@@ -207,6 +208,7 @@ class OnlineMapLinkerLayer(OnlineMapLinkerBase):
     def initAlgorithm(self, config):
         self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
+        self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterCrs(self.OUTPUT_CRS, 'Output CRS', defaultValue='ProjectCrs'))
         self.addParameter(QgsProcessingParameterFileDestination(self.LAYER_PATH, 'Layer Output', fileFilter='GeoPackage file (*.gpkg)', defaultValue=None))
 
