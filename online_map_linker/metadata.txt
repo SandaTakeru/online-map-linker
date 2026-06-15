@@ -2,7 +2,7 @@
 name=Online Map Linker
 qgisMinimumVersion=4.0
 description=This plugin generates links from point features to online maps.
-version=20260616
+version=20260616.1
 author=Sanda Takeru
 email=location.lab@sanda-takeru.com
 
