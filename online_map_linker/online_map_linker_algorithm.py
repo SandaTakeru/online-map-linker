@@ -7,10 +7,17 @@ __revision__ = '$Format:%H$'
 
 import tempfile, datetime
 
-from qgis.PyQt.QtCore import QCoreApplication, QMetaType
+from qgis.PyQt.QtCore import QCoreApplication, QMetaType, Qt
+from qgis.PyQt.QtGui import QImage, QPixmap, QColor
+from qgis.PyQt.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog
 from qgis.core import (QgsProcessing, QgsProcessingAlgorithm, QgsProcessingParameterFeatureSource,
                        QgsProcessingParameterField, QgsProcessingParameterEnum, QgsCoordinateReferenceSystem, QgsProcessingParameterFileDestination,
-                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsProcessingOutputFile, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProcessingParameterString, QgsProcessingParameterCrs, QgsFeatureRequest)
+                       QgsCoordinateTransform, QgsProject, QgsProcessingOutputHtml, QgsProcessingOutputFile, QgsVectorFileWriter, QgsVectorLayer, QgsField, QgsFeature, QgsGeometry, QgsProcessingParameterString, QgsProcessingParameterCrs, QgsProcessingParameterPoint, QgsProcessingParameterBoolean, QgsFeatureRequest)
+
+from .qrcodegen import QrCode
+
+# モードレス表示したQRダイアログがGCされないよう参照を保持する
+_open_qr_dialogs = []
 
 class OnlineMapLinkerBase(QgsProcessingAlgorithm):
     MAP_LIST = ['Google Maps', 'Apple Maps', 'Open Street Map', 'GSI Maps Japan', 'GSI Maps Vector Japan', 'Google Earth', 'Yahoo! MAP', 'Bing Maps', 'Mapion', 'MapFan']
@@ -50,6 +57,26 @@ class OnlineMapLinkerBase(QgsProcessingAlgorithm):
             return lambda x, y, name: f"https://mapfan.com/map?c={y},{x},16"
         else:
             raise Exception('No online maps found. Exiting process.')
+
+    def generateQrImage(self, text, target_px=720, border=4):
+        # 純PythonのQRジェネレータでマトリクスを作り、QImageに黒い四角を描画する
+        # 情報量(モジュール数)に関わらず原寸をほぼ一定の高解像度にし、モジュールは整数px(=くっきり)にする
+        qr = QrCode.encode_text(text, QrCode.Ecc.MEDIUM)
+        size = qr.get_size()
+        scale = max(1, target_px // (size + border * 2))
+        img_size = (size + border * 2) * scale
+        image = QImage(img_size, img_size, QImage.Format.Format_RGB32)
+        image.fill(QColor(255, 255, 255))
+        black = QColor(0, 0, 0).rgb()
+        for y in range(size):
+            for x in range(size):
+                if qr.get_module(x, y):
+                    px0 = (x + border) * scale
+                    py0 = (y + border) * scale
+                    for dy in range(scale):
+                        for dx in range(scale):
+                            image.setPixel(px0 + dx, py0 + dy, black)
+        return image
 
 class OnlineMapLinkerHTML(OnlineMapLinkerBase):
     OUTPUT = 'OUTPUT'
@@ -288,9 +315,11 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
     POINT_LAYER = 'point_layer'
     HTML_PATH = 'html_path'
     URL_TITLE = 'url_title'
+    CURRENT_LOCATION = 'current_location'
 
     def initAlgorithm(self, config):
-        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features.)', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features, or 9 if starting from current location.)', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterBoolean(self.CURRENT_LOCATION, 'Start from current location (the device that opens the link)', defaultValue=True))
         self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterString(self.URL_TITLE, 'URL Title', defaultValue=None, optional=True))
         self.addParameter(QgsProcessingParameterFileDestination(self.HTML_PATH, 'HTML Output', fileFilter='HTML files (*.html)', defaultValue=None))
@@ -301,14 +330,17 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
         sort_field = self.parameterAsString(parameters, self.SORT_FIELD, context)
         html_path = self.parameterAsString(parameters, self.HTML_PATH, context)
         url_title = self.parameterAsString(parameters, self.URL_TITLE, context)
+        current_location = self.parameterAsBool(parameters, self.CURRENT_LOCATION, context)
 
+        # Google Mapsの経路は合計10地点まで。現在地スタート時は現在地が1地点を消費するためレイヤは9点まで
+        max_points = 9 if current_location else 10
         feature_count = point_layer.featureCount()
         if feature_count == 0:
             error_msg = 'The layer has no features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
-        elif feature_count > 10:
-            error_msg = 'The layer has over 10 features. Exiting process.'
+        elif feature_count > max_points:
+            error_msg = f'The layer has over {max_points} features. Exiting process.'
             feedback.reportError(error_msg)
             raise Exception(error_msg)
 
@@ -316,6 +348,9 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
         features = self.getSortedFeatures(point_layer, sort_field)
 
         URL = 'https://www.google.co.jp/maps/dir'
+        if current_location:
+            # 出発地を空にすると現在地が始点になる（.../dir//lat,lon/...）
+            URL += '/'
         for feature in features:
             geometry = feature.geometry()
             geometry.transform(transform)
@@ -347,3 +382,171 @@ class OnlineMapLinkerMulti(OnlineMapLinkerBase):
 
     def createInstance(self):
         return OnlineMapLinkerMulti()
+
+class QrPopupDialog(QDialog):
+    # QR画像を表示し、手動でPNG保存できるポップアップ
+    DISPLAY_SIZE = 320
+
+    def __init__(self, pixmap, url, map_name, parent=None):
+        super().__init__(parent)
+        # 保存用は高解像度の原寸を保持し、表示だけ固定サイズにスケールしてウィンドウ大きさを一定にする
+        self._pixmap = pixmap
+        self._map_name = map_name
+        self.setWindowTitle('Online Map Linker (QR code)')
+        self.setFixedWidth(self.DISPLAY_SIZE + 40)
+        layout = QVBoxLayout(self)
+
+        display_pixmap = pixmap.scaled(self.DISPLAY_SIZE, self.DISPLAY_SIZE, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        image_label = QLabel(self)
+        image_label.setFixedSize(self.DISPLAY_SIZE, self.DISPLAY_SIZE)
+        image_label.setPixmap(display_pixmap)
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(image_label)
+
+        url_label = QLabel(f'<a href="{url}">{map_name}</a>', self)
+        url_label.setOpenExternalLinks(True)
+        url_label.setWordWrap(True)
+        layout.addWidget(url_label)
+
+        button_layout = QHBoxLayout()
+        save_button = QPushButton('Save…', self)
+        save_button.clicked.connect(self.saveImage)
+        close_button = QPushButton('Close', self)
+        close_button.clicked.connect(self.accept)
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(close_button)
+        layout.addLayout(button_layout)
+
+    def saveImage(self):
+        default_name = 'OML_QR(' + self._map_name + ')_' + datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime('%Y%m%d-%H%M%S') + '.png'
+        file_path, _ = QFileDialog.getSaveFileName(self, 'Save QR code', default_name, 'PNG files (*.png)')
+        if file_path:
+            self._pixmap.save(file_path, 'PNG')
+
+class OnlineMapLinkerQR(OnlineMapLinkerBase):
+    POINT = 'point'
+    ONLINE_MAP = 'online_map'
+
+    def initAlgorithm(self, config):
+        self.addParameter(QgsProcessingParameterPoint(self.POINT, 'Point on map canvas', defaultValue=None))
+        self.addParameter(QgsProcessingParameterEnum(self.ONLINE_MAP, 'Online Map', options=self.MAP_LIST, allowMultiple=False, usesStaticStrings=False, defaultValue='Open Street Map'))
+
+    def processAlgorithm(self, parameters, context, feedback):
+        online_map = self.parameterAsEnum(parameters, self.ONLINE_MAP, context)
+        wgs84_point = self.parameterAsPoint(parameters, self.POINT, context, QgsCoordinateReferenceSystem(4326))
+
+        link_function = self.generateLinkFunction(self.MAP_LIST[online_map])
+        x, y = wgs84_point.x(), wgs84_point.y()
+        url = link_function(x, y, 'Pin')
+
+        # QImageの生成はワーカースレッドでも安全。GUI表示はpostProcessAlgorithm（メインスレッド）で行う
+        self._qr_image = self.generateQrImage(url)
+        self._url = url
+        self._map_name = self.MAP_LIST[online_map]
+        return {}
+
+    def postProcessAlgorithm(self, context, feedback):
+        from qgis.utils import iface
+        parent = iface.mainWindow() if iface else None
+        pixmap = QPixmap.fromImage(self._qr_image)
+        dialog = QrPopupDialog(pixmap, self._url, self._map_name, parent)
+        # モードレス表示にしてプロセッシングを完了させ、QGIS本体を操作可能にする
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        _open_qr_dialogs.append(dialog)
+        dialog.finished.connect(lambda _result, d=dialog: _open_qr_dialogs.remove(d))
+        dialog.show()
+        return {}
+
+    def name(self):
+        return 'Online Map Linker (QR code)'
+
+    def displayName(self):
+        return self.tr(self.name())
+
+    def group(self):
+        return None
+
+    def groupId(self):
+        return None
+
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
+
+    def createInstance(self):
+        return OnlineMapLinkerQR()
+
+class OnlineMapLinkerMultiQR(OnlineMapLinkerBase):
+    SORT_FIELD = 'sort_field'
+    POINT_LAYER = 'point_layer'
+    CURRENT_LOCATION = 'current_location'
+
+    def initAlgorithm(self, config):
+        self.addParameter(QgsProcessingParameterFeatureSource(self.POINT_LAYER, 'Point Layer for creating links (Up to 10 features, or 9 if starting from current location.)', types=[QgsProcessing.SourceType.TypeVectorPoint], defaultValue=None))
+        self.addParameter(QgsProcessingParameterBoolean(self.CURRENT_LOCATION, 'Start from current location (the device that opens the link)', defaultValue=True))
+        self.addParameter(QgsProcessingParameterField(self.SORT_FIELD, 'Sort Field', parentLayerParameterName=self.POINT_LAYER, allowMultiple=False, defaultValue=None, optional=True))
+
+    def processAlgorithm(self, parameters, context, feedback):
+        point_layer = self.parameterAsSource(parameters, self.POINT_LAYER, context)
+        sort_field = self.parameterAsString(parameters, self.SORT_FIELD, context)
+        current_location = self.parameterAsBool(parameters, self.CURRENT_LOCATION, context)
+
+        # Google Mapsの経路は合計10地点まで。現在地スタート時は現在地が1地点を消費するためレイヤは9点まで
+        max_points = 9 if current_location else 10
+        feature_count = point_layer.featureCount()
+        if feature_count == 0:
+            error_msg = 'The layer has no features. Exiting process.'
+            feedback.reportError(error_msg)
+            raise Exception(error_msg)
+        elif feature_count > max_points:
+            error_msg = f'The layer has over {max_points} features. Exiting process.'
+            feedback.reportError(error_msg)
+            raise Exception(error_msg)
+
+        transform = self.createCoordinateTransform(point_layer.sourceCrs())
+        features = self.getSortedFeatures(point_layer, sort_field)
+
+        URL = 'https://www.google.co.jp/maps/dir'
+        if current_location:
+            # 出発地を空にすると現在地が始点になる（.../dir//lat,lon/...）
+            URL += '/'
+        for feature in features:
+            geometry = feature.geometry()
+            geometry.transform(transform)
+            x, y = geometry.asPoint().x(), geometry.asPoint().y()
+            URL += f"/{y},{x}"
+
+        # QImageの生成はワーカースレッドでも安全。GUI表示はpostProcessAlgorithm（メインスレッド）で行う
+        self._qr_image = self.generateQrImage(URL)
+        self._url = URL
+        self._map_name = 'Google Maps (Multi-destination routing)'
+        return {}
+
+    def postProcessAlgorithm(self, context, feedback):
+        from qgis.utils import iface
+        parent = iface.mainWindow() if iface else None
+        pixmap = QPixmap.fromImage(self._qr_image)
+        dialog = QrPopupDialog(pixmap, self._url, self._map_name, parent)
+        # モードレス表示にしてプロセッシングを完了させ、QGIS本体を操作可能にする
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        _open_qr_dialogs.append(dialog)
+        dialog.finished.connect(lambda _result, d=dialog: _open_qr_dialogs.remove(d))
+        dialog.show()
+        return {}
+
+    def name(self):
+        return 'Multi-destination routing (QR code, Google Maps)'
+
+    def displayName(self):
+        return self.tr(self.name())
+
+    def group(self):
+        return None
+
+    def groupId(self):
+        return None
+
+    def tr(self, string):
+        return QCoreApplication.translate('Processing', string)
+
+    def createInstance(self):
+        return OnlineMapLinkerMultiQR()

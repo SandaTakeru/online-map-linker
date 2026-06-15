@@ -2,7 +2,7 @@
 name=Online Map Linker
 qgisMinimumVersion=4.0
 description=This plugin generates links from point features to online maps.
-version=20260612
+version=20260616
 author=Sanda Takeru
 email=location.lab@sanda-takeru.com
 
@@ -14,11 +14,12 @@ repository=https://github.com/SandaTakeru/online-map-linker
 hasProcessingProvider=yes
 
 changelog=
+  20260616 - New feature: QR code algorithms - "Online Map Linker (QR code)" (pick a point on the canvas) and "Multi-destination routing (QR code, Google Maps)" pop up a QR code (offline QR generation, optional manual save). Both multi-destination routing algorithms (HTML and QR code) can start from the current location of the device that opens the link (max 9 layer points in that case, 10 otherwise)
   20260612 - QGIS 4 / Qt6 compatibility (enum updates, QVariant → QMetaType, writeAsVectorFormatV3, PyQt5 → qgis.PyQt); fix HTML character encoding (add meta charset utf-8)
   2024 Nov. - New feature: Multi-destination routing for Google Maps
   2024 Aug. - First release
 
-tags=web, online, map, link, open, google, HTML, CSV
+tags=web, online, map, link, open, google, HTML, CSV, QR
 
 homepage=https://github.com/SandaTakeru/online-map-linker
 category=Vector
